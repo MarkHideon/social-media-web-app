@@ -62,3 +62,97 @@ export async function getDbUserId() {
 
   return user.id
 }
+
+export async function getRandomUser() {
+  try{
+    const userId = await getDbUserId();
+  
+    //get 3 random user
+    const randomUsers = await prisma.user.findMany({
+      where:{
+        AND:[
+          {NOT:{id: userId}},
+          {
+            NOT:{
+              followers:{
+                some:{
+                  followerId: userId,
+                }
+              }
+            }
+          },
+        ]
+      },
+      select:{
+        id: true,
+        name: true,
+        username: true,
+        image: true,
+        _count: {
+          select:{
+            followers: true,
+          }
+        }
+      },
+      take: 3,
+    })
+
+    return randomUsers;
+  } catch(error){
+    console.log("Error fetching random users", error);
+    return[];
+  }
+}
+
+export async function toggleFollow(targetuserId:string) {
+  try {
+    const userId = await getDbUserId();
+    
+    if(userId === targetuserId) throw new Error("You cannot follow yourself");
+
+    const existingFollow = await prisma.follows.findUnique({
+      where:{
+        followerId_followingId:{
+          followerId: userId,
+          followingId: targetuserId
+        },
+      },
+    });
+
+    if (existingFollow) {
+      //unfollow
+      await prisma.follows.delete({
+        where:{
+          followerId_followingId:{
+            followerId:userId,
+            followingId:targetuserId,
+          },
+        },
+      });
+    } else {
+      //follow
+      await prisma.$transaction([
+        prisma.follows.create({
+          data:{
+            followerId: userId,
+            followingId: targetuserId,
+          },
+        }),
+
+        prisma.notification.create({
+          data:{
+            type:"FOLLOW",
+            userId: targetuserId, // user being followed
+            creatorId: userId, //user following
+          },
+        }),
+      ]);
+    }
+
+    revalidatePath("/");
+    return{success:true}
+  } catch (error) {
+    console.log("Error in toggleFollow", error);
+    return {success: false, error: "Error toggling follow"};
+  }
+}
