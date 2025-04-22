@@ -35,17 +35,17 @@ export async function syncUser() {
   }
 }
 
-export async function getUserByClerkId(clerkId:string) {
+export async function getUserByClerkId(clerkId: string) {
   return prisma.user.findUnique({
-    where:{
+    where: {
       clerkId,
     },
-    include:{
-      _count:{
-        select:{
-          followers:true,
-          following:true,
-          posts:true,
+    include: {
+      _count: {
+        select: {
+          followers: true,
+          following: true,
+          posts: true,
         },
       },
     },
@@ -53,106 +53,110 @@ export async function getUserByClerkId(clerkId:string) {
 }
 
 export async function getDbUserId() {
-  const { userId:clerkId } = await auth()
-  if(!clerkId) throw new Error("Unauthorized");
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return null;
 
   const user = await getUserByClerkId(clerkId);
 
-  if(!user) throw new Error("User not found");
+  if (!user) throw new Error("User not found");
 
-  return user.id
+  return user.id;
 }
 
 export async function getRandomUser() {
-  try{
+  try {
     const userId = await getDbUserId();
-  
-    //get 3 random user
+
+    if (!userId) return [];
+
+    // get 3 random users exclude ourselves & users that we already follow
     const randomUsers = await prisma.user.findMany({
-      where:{
-        AND:[
-          {NOT:{id: userId}},
+      where: {
+        AND: [
+          { NOT: { id: userId } },
           {
-            NOT:{
-              followers:{
-                some:{
+            NOT: {
+              followers: {
+                some: {
                   followerId: userId,
-                }
-              }
-            }
+                },
+              },
+            },
           },
-        ]
+        ],
       },
-      select:{
+      select: {
         id: true,
         name: true,
         username: true,
         image: true,
         _count: {
-          select:{
+          select: {
             followers: true,
-          }
-        }
+          },
+        },
       },
       take: 3,
-    })
+    });
 
     return randomUsers;
-  } catch(error){
+  } catch (error) {
     console.log("Error fetching random users", error);
-    return[];
+    return [];
   }
 }
 
-export async function toggleFollow(targetuserId:string) {
+export async function toggleFollow(targetUserId: string) {
   try {
     const userId = await getDbUserId();
-    
-    if(userId === targetuserId) throw new Error("You cannot follow yourself");
+
+    if (!userId) return;
+
+    if (userId === targetUserId) throw new Error("You cannot follow yourself");
 
     const existingFollow = await prisma.follows.findUnique({
-      where:{
-        followerId_followingId:{
+      where: {
+        followerId_followingId: {
           followerId: userId,
-          followingId: targetuserId
+          followingId: targetUserId,
         },
       },
     });
 
     if (existingFollow) {
-      //unfollow
+      // unfollow
       await prisma.follows.delete({
-        where:{
-          followerId_followingId:{
-            followerId:userId,
-            followingId:targetuserId,
+        where: {
+          followerId_followingId: {
+            followerId: userId,
+            followingId: targetUserId,
           },
         },
       });
     } else {
-      //follow
+      // follow
       await prisma.$transaction([
         prisma.follows.create({
-          data:{
+          data: {
             followerId: userId,
-            followingId: targetuserId,
+            followingId: targetUserId,
           },
         }),
 
         prisma.notification.create({
-          data:{
-            type:"FOLLOW",
-            userId: targetuserId, // user being followed
-            creatorId: userId, //user following
+          data: {
+            type: "FOLLOW",
+            userId: targetUserId, // user being followed
+            creatorId: userId, // user following
           },
         }),
       ]);
     }
 
     revalidatePath("/");
-    return{success:true}
+    return { success: true };
   } catch (error) {
     console.log("Error in toggleFollow", error);
-    return {success: false, error: "Error toggling follow"};
+    return { success: false, error: "Error toggling follow" };
   }
 }
